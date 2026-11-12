@@ -25,9 +25,9 @@ const {
   triggerGracefulShutdown,
 } = require("./layers/graceful.shutdown.layer");
 const TesseractEngine = require("./lib/tesseract.lib");
-const {
-  PortfolioExtractionError,
-} = require("./lib/portfolio-validation.lib");
+const { PortfolioExtractionError } = require("./lib/portfolio-validation.lib");
+const shares = require("./service/shares.service");
+const portfolioService = new shares();
 
 if (clustering && cluster.isPrimary) {
   clusterInterceptor();
@@ -40,11 +40,7 @@ if (clustering && cluster.isPrimary) {
   const app = express();
   const activeRequests = new Set();
 
-  const allowedImageTypes = new Set([
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-  ]);
+  const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
@@ -78,6 +74,38 @@ if (clustering && cluster.isPrimary) {
   app.get("/", (_, res) => {
     res.json({ message: "hello world" });
   });
+
+  async function getPortfolio(req, res) {
+    try {
+      const { date } = req.params;
+
+      const data = await portfolioService.getStoreData(date);
+
+      const found = data.length > 0;
+
+      return res.status(found ? 200 : 404).json({
+        success: found,
+        count: data.length,
+        data,
+        message: found
+          ? "Portfolio data retrieved successfully"
+          : "No portfolio data found",
+        statusCode: found ? 200 : 404,
+      });
+    } catch (error) {
+      console.error("Portfolio retrieval error:", error);
+
+      return res.status(500).json({
+        success: false,
+        data: [],
+        message: error.message,
+        statusCode: 500,
+      });
+    }
+  }
+
+  app.get("/api/portfolio", getPortfolio);
+  app.get("/api/portfolio/:date", getPortfolio);
 
   app.post(
     "/api/portfolio/extract",

@@ -1,4 +1,3 @@
-
 const { getDb } = require("../database/mongodb");
 const { DATABASE_COLLECTION } = require("../provider/config.map");
 
@@ -16,13 +15,34 @@ module.exports = class ShareService {
 
     if (typeof collectionName !== "string") {
       throw new Error(
-        `Invalid MongoDB collection name: ${JSON.stringify(collectionName)}`
+        `Invalid MongoDB collection name: ${JSON.stringify(collectionName)}`,
       );
     }
 
     this.#collectionCache = db.collection(collectionName);
 
     return this.#collectionCache;
+  }
+
+  async getStoreData(date) {
+    try {
+      const collection = await this.collection();
+
+      const filter = {};
+
+      if (date) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          throw new Error("Invalid date format. Expected YYYY-MM-DD");
+        }
+
+        filter.date = date;
+      }
+
+      return await collection.find(filter).sort({ date: -1 }).toArray();
+    } catch (error) {
+      console.error("Failed to retrieve portfolio data:", error);
+      throw error;
+    }
   }
 
   async storeData(data) {
@@ -51,7 +71,7 @@ module.exports = class ShareService {
           createdAt: new Date(),
         },
       },
-      { upsert: true }
+      { upsert: true },
     );
   }
 };
