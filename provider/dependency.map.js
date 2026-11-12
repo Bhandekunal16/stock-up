@@ -6,6 +6,9 @@ const {
   createCipheriv,
   createDecipheriv,
 } = require("crypto");
+const {
+  MongoClient,
+} = require("mongodb");
 
 module.exports = {
   express: require("express"),
@@ -25,4 +28,5 @@ module.exports = {
   createDecipheriv,
   performance,
   multer: require("multer"),
+  MongoClient,
 };

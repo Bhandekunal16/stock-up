@@ -1,0 +1,18 @@
+{
+  "MONGODB_USERNAME": "bhandekunal16",
+  "MONGODB_PASSWORD": "SppcHRFdBS74An8v",
+  "MONGODB_URI": "mongodb+srv://bhandekunal16:SppcHRFdBS74An8v@cluster0.xxevqv7.mongodb.net",
+  "MONGO_CONFIG": {
+    "maxPoolSize": 20,
+    "minPoolSize": 2,
+    "connectTimeoutMS": 10000,
+    "serverSelectionTimeoutMS": 10000,
+    "retryReads": true,
+    "retryWrites": true,
+    "tls": true
+  },
+  "DATABASE_NAME": "Investments",
+  "DATABASE_COLLECTION": {
+    "shares": "shares"
+  }
+}
