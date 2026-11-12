@@ -1,0 +1,11 @@
+node_modules/
+logs/
+coverage/
+test/*
+data/*
+eng.traineddata
+application/*
+api.md
+architecture.md
+README.md
+docker.process.sh
