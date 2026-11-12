@@ -1,14 +1,19 @@
+
+const path = require("node:path");
+
 const {
   express,
   cluster,
   logByte,
   multer,
 } = require("./provider/dependency.map");
+
 const {
   clusterInterceptor,
   markClusterShuttingDown,
   replicate,
 } = require("./provider/interceptor.map");
+
 const {
   host,
   port,
@@ -17,17 +22,29 @@ const {
   clustering,
   replicas,
 } = require("./provider/config.map");
+
 const { middleware, errorMiddleware } = require("./middleware.loader");
+
 const {
   gracefulShutdown,
   registerClusterPrimaryShutdown,
   registerWorkerShutdownMessage,
   triggerGracefulShutdown,
 } = require("./layers/graceful.shutdown.layer");
+
 const TesseractEngine = require("./lib/tesseract.lib");
-const { PortfolioExtractionError } = require("./lib/portfolio-validation.lib");
+
+const {
+  PortfolioExtractionError,
+} = require("./lib/portfolio-validation.lib");
+
 const shares = require("./service/shares.service");
+
 const portfolioService = new shares();
+
+// ---------------------------------------------------------
+// Cluster primary process
+// ---------------------------------------------------------
 
 if (clustering && cluster.isPrimary) {
   clusterInterceptor();
@@ -36,44 +53,81 @@ if (clustering && cluster.isPrimary) {
     shutdownTimeout: SHUTDOWN_TIMEOUT,
     markClusterShuttingDown,
   });
+
 } else {
+
+  // -------------------------------------------------------
+  // Express application
+  // -------------------------------------------------------
+
   const app = express();
+
   const activeRequests = new Set();
 
-  const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  // -------------------------------------------------------
+  // Middleware
+  // -------------------------------------------------------
+
+  app.use(express.json());
+
+  app.use(express.urlencoded({
+    extended: true,
+  }));
+
+  // -------------------------------------------------------
+  // Image upload configuration
+  // -------------------------------------------------------
+
+  const allowedImageTypes = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+  ]);
+
   const upload = multer({
     storage: multer.memoryStorage(),
+
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10 MB
+      fileSize: 10 * 1024 * 1024,
     },
+
     fileFilter: (req, file, cb) => {
       if (!allowedImageTypes.has(file.mimetype)) {
-        return cb(new Error("Only JPEG, PNG, and WebP images are allowed"));
+        return cb(
+          new Error("Only JPEG, PNG, and WebP images are allowed")
+        );
       }
 
       cb(null, true);
     },
   });
 
+  // -------------------------------------------------------
+  // Existing application middleware
+  // -------------------------------------------------------
+
   middleware(app);
+
+  // -------------------------------------------------------
+  // Active request tracking
+  // -------------------------------------------------------
 
   app.use((req, res, next) => {
     activeRequests.add(res);
 
-    res.once("finish", () => {
+    const cleanup = () => {
       activeRequests.delete(res);
-    });
+    };
 
-    res.once("close", () => {
-      activeRequests.delete(res);
-    });
+    res.once("finish", cleanup);
+    res.once("close", cleanup);
 
     next();
   });
 
-  app.get("/", (_, res) => {
-    res.json({ message: "hello world" });
-  });
+  // -------------------------------------------------------
+  // Portfolio retrieval handler
+  // -------------------------------------------------------
 
   async function getPortfolio(req, res) {
     try {
@@ -81,111 +135,190 @@ if (clustering && cluster.isPrimary) {
 
       const data = await portfolioService.getStoreData(date);
 
-      const found = data.length > 0;
+      const found = Array.isArray(data) && data.length > 0;
 
       return res.status(found ? 200 : 404).json({
         success: found,
-        count: data.length,
-        data,
+        count: found ? data.length : 0,
+        data: found ? data : [],
+
         message: found
           ? "Portfolio data retrieved successfully"
           : "No portfolio data found",
+
         statusCode: found ? 200 : 404,
       });
+
     } catch (error) {
-      console.error("Portfolio retrieval error:", error);
+      logByte.error(`Portfolio retrieval error: ${error.message}`);
 
       return res.status(500).json({
         success: false,
+        count: 0,
         data: [],
-        message: error.message,
+        message: "Failed to retrieve portfolio data",
         statusCode: 500,
       });
     }
   }
 
+  // -------------------------------------------------------
+  // Portfolio extraction handler
+  // -------------------------------------------------------
+
+  async function extractPortfolio(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "Please upload an image",
+        });
+      }
+
+      const engine = new TesseractEngine();
+
+      const extractedShares = await engine.runner(req.file.buffer);
+
+      return res.status(200).json({
+        success: true,
+        count: extractedShares.length,
+        data: extractedShares,
+      });
+
+    } catch (error) {
+      logByte.error(`Portfolio extraction error: ${error.message}`);
+
+      const statusCode =
+        error instanceof PortfolioExtractionError
+          ? error.statusCode
+          : Number.isInteger(error.statusCode)
+            ? error.statusCode
+            : 500;
+
+      const response = {
+        success: false,
+
+        message:
+          error instanceof PortfolioExtractionError
+            ? error.message
+            : "Failed to extract portfolio data",
+      };
+
+      if (error.details) {
+        response.details = error.details;
+      } else if (statusCode === 500) {
+        response.error = error.message;
+      }
+
+      return res.status(statusCode).json(response);
+    }
+  }
+
+  // -------------------------------------------------------
+  // API routes
+  // Register APIs BEFORE React static hosting
+  // -------------------------------------------------------
+
   app.get("/api/portfolio", getPortfolio);
+
   app.get("/api/portfolio/:date", getPortfolio);
 
   app.post(
     "/api/portfolio/extract",
     upload.single("image"),
-    async (req, res) => {
-      try {
-        if (!req.file) {
-          return res.status(400).json({
-            success: false,
-            message: "Please upload an image",
-          });
-        }
-
-        const engine = new TesseractEngine();
-
-        const shares = await engine.runner(req.file.buffer);
-
-        return res.status(200).json({
-          success: true,
-          count: shares.length,
-          data: shares,
-        });
-      } catch (error) {
-        console.error("Portfolio extraction error:", error);
-
-        const statusCode =
-          error instanceof PortfolioExtractionError
-            ? error.statusCode
-            : Number.isInteger(error.statusCode)
-              ? error.statusCode
-              : 500;
-        const response = {
-          success: false,
-          message:
-            error instanceof PortfolioExtractionError
-              ? error.message
-              : "Failed to extract portfolio data",
-        };
-
-        if (error.details) {
-          response.details = error.details;
-        } else if (statusCode === 500) {
-          response.error = error.message;
-        }
-
-        return res.status(statusCode).json(response);
-      }
-    },
+    extractPortfolio
   );
 
-  app.use((err, _, res, next) => {
-    if (err instanceof multer.MulterError) {
-      return res.status(400).json({
-        success: false,
-        message: err.message,
-      });
-    }
+  // -------------------------------------------------------
+  // React production build
+  // -------------------------------------------------------
 
-    if (err) {
-      return res.status(400).json({
-        success: false,
-        message: err.message,
+  const distPath = path.resolve(__dirname, "dist");
+
+  const indexPath = path.join(distPath, "index.html");
+
+  // Serve React static assets
+  app.use(express.static(distPath, {
+    index: false,
+    fallthrough: true,
+  }));
+
+  // -------------------------------------------------------
+  // React SPA fallback
+  // Supports:
+  // /
+  // /dashboard
+  // /settings
+  // /holdings
+  // /analytics
+  // -------------------------------------------------------
+
+  app.get("/{*splat}", (req, res, next) => {
+    if (req.accepts("html")) {
+      return res.sendFile(indexPath, (error) => {
+        if (error) {
+          next(error);
+        }
       });
     }
 
     next();
   });
 
-  app.use((_, res) => {
-    res.status(404).json({
-      status: false,
-      statusCode: 404,
-      message: "Not Found",
+  // -------------------------------------------------------
+  // Multer and application error handler
+  // -------------------------------------------------------
+
+  app.use((err, req, res, next) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    const statusCode =
+      err instanceof multer.MulterError
+        ? 400
+        : 500;
+
+    logByte.error(`Application error: ${err.message}`);
+
+    return res.status(statusCode).json({
+      success: false,
+      statusCode,
+      message: err.message || "Internal server error",
     });
   });
 
+  // -------------------------------------------------------
+  // Not found handler
+  // -------------------------------------------------------
+
+  app.use((req, res) => {
+    return res.status(404).json({
+      success: false,
+      statusCode: 404,
+      message: "Not Found",
+      path: req.originalUrl,
+    });
+  });
+
+  // Existing error middleware
   errorMiddleware(app);
 
-  const serverName = clustering ? "Express worker" : "Express";
-  const servers = replicate(app, host, port, REPLICA, replicas);
+  // -------------------------------------------------------
+  // Start Express replicas
+  // -------------------------------------------------------
+
+  const serverName = clustering
+    ? "Express worker"
+    : "Express";
+
+  const servers = replicate(
+    app,
+    host,
+    port,
+    REPLICA,
+    replicas
+  );
 
   for (const server of servers) {
     gracefulShutdown({
@@ -193,11 +326,16 @@ if (clustering && cluster.isPrimary) {
       name: serverName,
       shutdownTimeout: SHUTDOWN_TIMEOUT,
       activeRequests,
+
       onShutdown: () => {
         logByte.warn(`${serverName}: shutdown started`);
       },
     });
   }
+
+  // -------------------------------------------------------
+  // Cluster worker shutdown handling
+  // -------------------------------------------------------
 
   if (clustering) {
     registerWorkerShutdownMessage(() => {
