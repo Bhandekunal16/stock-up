@@ -3,5 +3,8 @@
   "invalidFile": "Only JPEG, PNG, and WebP images are supported",
   "invalidDamnation": "Invalid image dimensions",
   "notDecodable": "Uploaded image could not be decoded",
-  "invalidData": "Image normalization produced invalid pixel data"
+  "invalidData": "Image normalization produced invalid pixel data",
+  "imageTypes": ["jpeg", "png", "webp"],
+  "MAX_IMAGE_DIMENSION": 2400,
+  "MAX_IMAGE_PIXELS": 20000000
 }
