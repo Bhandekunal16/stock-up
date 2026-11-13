@@ -1,0 +1,7 @@
+{
+  "invalidImage": "Uploaded file is not a valid image",
+  "invalidFile": "Only JPEG, PNG, and WebP images are supported",
+  "invalidDamnation": "Invalid image dimensions",
+  "notDecodable": "Uploaded image could not be decoded",
+  "invalidData": "Image normalization produced invalid pixel data"
+}

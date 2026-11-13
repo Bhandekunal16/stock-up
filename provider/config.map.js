@@ -5,6 +5,7 @@ const environment = {
   helmet: require("../json/helmet.config.json"),
   logger: require("../json/logger.config.json"),
   mongo: require("../json/mongodb.config.json"),
+  image_lab: require("../json/image.lib.config.json"),
 };
 
 module.exports = {
@@ -14,4 +15,5 @@ module.exports = {
   helmet: environment.helmet,
   ...environment.logger,
   ...environment.mongo,
+  ...environment.image_lab,
 };
