@@ -10,3 +10,4 @@ architecture.md
 README.md
 docker.process.sh
 client/*
+agent/*

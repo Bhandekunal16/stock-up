@@ -4,3 +4,4 @@ coverage/
 test/*
 data/*
 eng.traineddata
+agent/*
